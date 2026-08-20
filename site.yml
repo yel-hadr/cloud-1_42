@@ -1,0 +1,7 @@
+---
+- name: Baseline configuration for all hosts
+  hosts: webservers
+  become: true
+  roles:
+    - common
+    - security

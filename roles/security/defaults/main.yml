@@ -1,0 +1,25 @@
+---
+# Ports opened before the firewall is enabled. OpenSSH MUST stay in this
+# list or enabling ufw will lock you out of the box.
+security_allowed_services:
+  - OpenSSH
+
+security_allowed_ports:
+  - 80
+  - 443
+
+# sshd hardening
+security_ssh_permit_root_login: 'no'
+security_ssh_password_authentication: 'no'
+security_ssh_x11_forwarding: 'no'
+security_ssh_max_auth_tries: 3
+
+# fail2ban sshd jail
+security_fail2ban_maxretry: 5
+security_fail2ban_bantime: 600
+security_fail2ban_findtime: 600
+
+security_packages:
+  - ufw
+  - fail2ban
+  - unattended-upgrades

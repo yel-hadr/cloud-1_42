@@ -1,0 +1,10 @@
+# Managed by Ansible - roles/security/templates/jail.local.j2
+[DEFAULT]
+bantime = {{ security_fail2ban_bantime }}
+findtime = {{ security_fail2ban_findtime }}
+maxretry = {{ security_fail2ban_maxretry }}
+
+[sshd]
+enabled = true
+port = ssh
+backend = systemd

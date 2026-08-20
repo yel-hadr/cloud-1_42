@@ -1,0 +1,90 @@
+---
+# ORDER MATTERS IN THIS ROLE.
+# Firewall rules go on before the firewall is enabled, and the firewall is
+# settled before sshd is touched. Getting this backwards locks you out of
+# a box you can only reach over SSH.
+
+- name: Install security packages
+  ansible.builtin.apt:
+    name: "{{ security_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# --- Firewall -----------------------------------------------------------
+
+- name: Allow SSH through the firewall
+  community.general.ufw:
+    rule: allow
+    name: "{{ item }}"
+  loop: "{{ security_allowed_services }}"
+
+- name: Allow web ports through the firewall
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop: "{{ security_allowed_ports }}"
+
+- name: Default-deny incoming traffic
+  community.general.ufw:
+    direction: incoming
+    policy: deny
+
+- name: Allow all outgoing traffic
+  community.general.ufw:
+    direction: outgoing
+    policy: allow
+
+# Only now, with SSH explicitly allowed above, is it safe to turn ufw on.
+- name: Enable the firewall
+  community.general.ufw:
+    state: enabled
+
+# --- fail2ban -----------------------------------------------------------
+
+- name: Configure the fail2ban sshd jail
+  ansible.builtin.template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart fail2ban
+
+# Skipped under --check: in check mode the package above was never really
+# installed, so the unit does not exist yet and this would fail for a
+# reason that says nothing about the real run.
+- name: Ensure fail2ban is running and enabled
+  ansible.builtin.service:
+    name: fail2ban
+    state: started
+    enabled: true
+  when: not ansible_check_mode
+
+# --- Automatic security updates ----------------------------------------
+
+- name: Enable unattended security upgrades
+  ansible.builtin.copy:
+    dest: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: '0644'
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+# --- sshd hardening (last, and validated) -------------------------------
+
+# `validate` runs sshd -t against the candidate file BEFORE Ansible moves
+# it into place. If the config is bad the task fails and the old, working
+# config stays untouched - that is what stops a typo becoming a lockout.
+- name: Harden sshd
+  ansible.builtin.template:
+    src: 99-hardening.conf.j2
+    dest: /etc/ssh/sshd_config.d/99-hardening.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/sbin/sshd -t -f %s
+  notify: Reload sshd

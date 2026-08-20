@@ -1,0 +1,8 @@
+---
+# A named host with ansible_host holding the IP, rather than the IP as the
+# host name. This way the address can change without touching playbooks,
+# and log output says "cloud1" instead of a bare number.
+webservers:
+  hosts:
+    cloud1:
+      ansible_host: 15.188.53.129

@@ -1,0 +1,23 @@
+---
+# Every value the common role uses lives here so it can be overridden
+# from inventory, group_vars, or the command line without editing tasks.
+
+common_timezone: Etc/UTC
+
+common_packages:
+  - vim
+  - curl
+  - git
+  - htop
+  - unzip
+  - ca-certificates
+  - python3-apt
+
+# Run a safe upgrade of already-installed packages.
+common_apt_upgrade: safe
+
+# Admin user created on every host. Set common_admin_key to a real public
+# key (or leave empty to skip the authorized_key task entirely).
+common_admin_user: deploy
+common_admin_groups: sudo
+common_admin_key: ""

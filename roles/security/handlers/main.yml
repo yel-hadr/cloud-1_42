@@ -1,0 +1,16 @@
+---
+# Reload, never restart. `reload` re-reads the config and leaves existing
+# SSH sessions alive; `restart` drops them. If the new config is broken,
+# a reload leaves you still logged in and able to fix it.
+- name: Reload sshd
+  ansible.builtin.service:
+    name: ssh
+    state: reloaded
+
+# Same reason as the fail2ban service task: under --check the package was
+# never really installed, so the unit does not exist.
+- name: Restart fail2ban
+  ansible.builtin.service:
+    name: fail2ban
+    state: restarted
+  when: not ansible_check_mode

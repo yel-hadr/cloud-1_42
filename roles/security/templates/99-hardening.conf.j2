@@ -1,0 +1,7 @@
+# Managed by Ansible - roles/security/templates/99-hardening.conf.j2
+# Loaded from /etc/ssh/sshd_config.d/, overriding the distro defaults.
+PermitRootLogin {{ security_ssh_permit_root_login }}
+PasswordAuthentication {{ security_ssh_password_authentication }}
+X11Forwarding {{ security_ssh_x11_forwarding }}
+MaxAuthTries {{ security_ssh_max_auth_tries }}
+PubkeyAuthentication yes

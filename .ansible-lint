@@ -1,0 +1,10 @@
+---
+# Inception/ is a separate project (Docker/WordPress stack) with its own
+# git repo, and its srcs/data/ holds root-owned container volumes that
+# ansible-lint cannot read. Nothing in there is Ansible content.
+exclude_paths:
+  - Inception/
+  - .git/
+
+# facts.json is captured `ansible all -m setup` output, not playbook content.
+skip_list: []

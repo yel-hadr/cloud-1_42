@@ -1,0 +1,7 @@
+---
+# The full `ansible` package bundles these, but pinning them here means a
+# bare ansible-core install can reproduce the environment:
+#   ansible-galaxy collection install -r requirements.yml
+collections:
+  - name: community.general   # ufw, timezone
+  - name: ansible.posix       # authorized_key
