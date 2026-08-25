@@ -1,0 +1,27 @@
+---
+# Docker Engine + Compose plugin, from Docker's own apt repository.
+
+# Codename used for the download.docker.com suite. Defaults to the host's
+# own release; if Docker has no repo for it yet (very fresh Ubuntu, or a
+# non-LTS), the role falls back to docker_apt_codename_fallback.
+docker_apt_codename: "{{ ansible_facts['distribution_release'] }}"
+docker_apt_codename_fallback: noble
+
+docker_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+
+# Users added to the docker group. Membership grants root-equivalent
+# access to the host, so keep this list short. Playbook tasks do not need
+# it - they run through become - so the default is empty.
+docker_users: []
+
+# Logs are unbounded by default; on a small instance that fills the disk.
+docker_daemon_options:
+  log-driver: json-file
+  log-opts:
+    max-size: 10m
+    max-file: "3"

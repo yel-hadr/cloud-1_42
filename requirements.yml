@@ -5,3 +5,5 @@
 collections:
   - name: community.general   # ufw, timezone
   - name: ansible.posix       # authorized_key
+  - name: community.docker    # docker_compose_v2, docker_container_exec
+  - name: community.crypto    # self-signed TLS certificate

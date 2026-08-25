@@ -1,0 +1,21 @@
+---
+# Non-secret, per-group settings. Secrets live next door in vault.yml,
+# encrypted; nothing in this file is confidential.
+
+# The public name of the site. With no DNS name of your own the server's
+# IP works over HTTPS (with a self-signed-certificate warning). With a
+# free DuckDNS name, set it here and phpMyAdmin answers on pma.<name>.
+wordpress_domain: "{{ ansible_host }}"
+wordpress_site_url: "https://{{ wordpress_domain }}"
+
+wordpress_site_title: Cloud-1
+wordpress_admin_user: cloud1admin
+wordpress_admin_email: "ssefy1998@gmail.com"
+
+wordpress_db_name: wordpress
+wordpress_db_user: wpuser
+
+# Convenience only: lets the admin user run docker without sudo. Docker
+# group membership is root-equivalent, so nothing else goes in here.
+docker_users:
+  - "{{ common_admin_user }}"

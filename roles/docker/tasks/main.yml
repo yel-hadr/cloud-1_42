@@ -1,0 +1,93 @@
+---
+- name: Install prerequisites for the Docker repository
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+      - gnupg
+      - python3-cryptography
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the apt keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the Docker apt signing key
+  ansible.builtin.get_url:
+    url: https://download.docker.com/linux/ubuntu/gpg
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: '0644'
+
+# Docker publishes a suite per Ubuntu codename, and a brand-new release
+# (or a non-LTS one) may not have one yet. Probing here means the role
+# still works on a host newer than Docker's repo, instead of failing on
+# an apt update with a 404 that says nothing useful.
+- name: Check whether Docker publishes a repository for this release
+  ansible.builtin.uri:
+    url: "https://download.docker.com/linux/ubuntu/dists/{{ docker_apt_codename }}/Release"
+    method: HEAD
+    status_code: [200, 403, 404]
+  register: docker_repo_probe
+  changed_when: false
+  check_mode: false
+
+- name: Select the repository suite to use
+  ansible.builtin.set_fact:
+    docker_apt_suite: >-
+      {{ docker_apt_codename if docker_repo_probe.status == 200
+         else docker_apt_codename_fallback }}
+
+- name: Warn when falling back to an older Docker suite
+  ansible.builtin.debug:
+    msg: >-
+      Docker has no repository for '{{ docker_apt_codename }}';
+      using '{{ docker_apt_codename_fallback }}' packages instead.
+  when: docker_apt_suite != docker_apt_codename
+
+- name: Add the Docker apt repository
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ 'amd64' if ansible_facts['architecture'] == 'x86_64' else 'arm64' }}
+      signed-by=/etc/apt/keyrings/docker.asc]
+      https://download.docker.com/linux/ubuntu {{ docker_apt_suite }} stable
+    filename: docker
+    state: present
+
+- name: Install Docker Engine and the Compose plugin
+  ansible.builtin.apt:
+    name: "{{ docker_packages }}"
+    state: present
+    update_cache: true
+
+- name: Configure the Docker daemon
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    content: "{{ docker_daemon_options | to_nice_json }}\n"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Restart docker
+
+# `enabled` is what makes the stack come back after a reboot: systemd
+# starts docker, and each container's restart policy brings it up.
+- name: Ensure Docker is running and starts at boot
+  ansible.builtin.service:
+    name: docker
+    state: started
+    enabled: true
+  when: not ansible_check_mode
+
+- name: Add users to the docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_users }}"

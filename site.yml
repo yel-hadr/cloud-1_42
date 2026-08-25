@@ -1,7 +1,12 @@
 ---
-- name: Baseline configuration for all hosts
+- name: Deploy the Inception stack
   hosts: webservers
   become: true
+
+  # Ansible runs hosts in parallel by default, so adding servers to the
+  # webservers group deploys to all of them in one pass.
   roles:
-    - common
-    - security
+    - common     # packages, timezone, hostname, admin user
+    - security   # ufw (22/80/443 only), fail2ban, sshd hardening
+    - docker     # Docker Engine + Compose plugin, enabled at boot
+    - wordpress  # the containerised WordPress / phpMyAdmin / MariaDB stack

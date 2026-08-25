@@ -1,0 +1,49 @@
+---
+# Where the stack lives on the target. Everything Compose needs (the
+# compose file, .env, nginx config, TLS material) is under this directory.
+wordpress_stack_dir: /opt/cloud1
+wordpress_project_name: cloud1
+
+# Public names. wordpress_domain serves WordPress; wordpress_pma_domain serves
+# phpMyAdmin. nginx picks between them on the Host header, so both must
+# resolve to this server for the phpMyAdmin vhost to be reachable.
+wordpress_domain: "{{ ansible_host }}"
+wordpress_pma_domain: "pma.{{ wordpress_domain }}"
+wordpress_site_url: "https://{{ wordpress_domain }}"
+
+# Pinned image tags: an unpinned `latest` makes re-runs non-reproducible.
+wordpress_image_mariadb: mariadb:11.4
+wordpress_image_wordpress: wordpress:6.8-fpm-alpine
+wordpress_image_phpmyadmin: phpmyadmin:5-fpm-alpine
+wordpress_image_nginx: nginx:1.27-alpine
+wordpress_image_wpcli: wordpress:cli-php8.3
+
+wordpress_db_name: wordpress
+wordpress_db_user: wpuser
+
+wordpress_site_title: Cloud-1
+wordpress_admin_user: admin
+wordpress_admin_email: "admin@{{ wordpress_domain }}"
+
+# Container memory ceilings. The default instance has under 1 GB of RAM,
+# so an unbounded MariaDB or PHP pool can OOM the whole box.
+wordpress_mem_mariadb: 384m
+wordpress_mem_wordpress: 256m
+wordpress_mem_phpmyadmin: 128m
+wordpress_mem_nginx: 64m
+
+# TLS. With no certificate supplied the role generates a self-signed one,
+# which is enough for the mandatory part; point these at real files (or a
+# certbot-managed path) to serve a trusted certificate instead.
+wordpress_tls_cert_path: "{{ wordpress_stack_dir }}/certs/fullchain.pem"
+wordpress_tls_key_path: "{{ wordpress_stack_dir }}/certs/privkey.pem"
+wordpress_tls_self_signed: true
+wordpress_tls_country: MA
+wordpress_tls_org: cloud1
+
+# Host services that would hold ports 80/443 before the stack's own nginx
+# can bind them. They are stopped and disabled, not removed.
+wordpress_conflicting_services:
+  - nginx
+  - apache2
+  - lighttpd

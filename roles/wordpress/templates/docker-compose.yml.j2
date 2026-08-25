@@ -1,0 +1,158 @@
+# {{ ansible_managed }}
+#
+# One process per container: nginx terminates TLS, wordpress and
+# phpmyadmin are php-fpm pools, mariadb is the database. Only nginx
+# publishes ports; everything else is reachable on internal networks only.
+
+name: {{ wordpress_project_name }}
+
+services:
+  mariadb:
+    image: {{ wordpress_image_mariadb }}
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${DB_NAME}
+      MARIADB_USER: ${DB_USER}
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    mem_limit: {{ wordpress_mem_mariadb }}
+
+  wordpress:
+    image: {{ wordpress_image_wordpress }}
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: mariadb:3306
+      WORDPRESS_DB_NAME: ${DB_NAME}
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+      WORDPRESS_AUTH_KEY: ${WP_AUTH_KEY}
+      WORDPRESS_SECURE_AUTH_KEY: ${WP_SECURE_AUTH_KEY}
+      WORDPRESS_LOGGED_IN_KEY: ${WP_LOGGED_IN_KEY}
+      WORDPRESS_NONCE_KEY: ${WP_NONCE_KEY}
+      WORDPRESS_AUTH_SALT: ${WP_AUTH_SALT}
+      WORDPRESS_SECURE_AUTH_SALT: ${WP_SECURE_AUTH_SALT}
+      WORDPRESS_LOGGED_IN_SALT: ${WP_LOGGED_IN_SALT}
+      WORDPRESS_NONCE_SALT: ${WP_NONCE_SALT}
+      # nginx terminates TLS, so PHP only sees plain HTTP on the internal
+      # network. Without this WordPress builds http:// URLs and loops.
+      WORDPRESS_CONFIG_EXTRA: |
+        define('WP_HOME', '{{ wordpress_site_url }}');
+        define('WP_SITEURL', '{{ wordpress_site_url }}');
+        if (isset($$_SERVER['HTTP_X_FORWARDED_PROTO']) && $$_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+            $$_SERVER['HTTPS'] = 'on';
+        }
+    volumes:
+      - wordpress_data:/var/www/html
+    networks:
+      - backend
+      - frontend
+    # php-fpm listens on 9000 only once it has finished unpacking
+    # WordPress into the volume. Gating nginx on this (below) keeps the
+    # first boot in order instead of relying on luck.
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9000"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 40s
+    mem_limit: {{ wordpress_mem_wordpress }}
+
+  phpmyadmin:
+    image: {{ wordpress_image_phpmyadmin }}
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      PMA_HOST: mariadb
+      PMA_PORT: 3306
+      PMA_ABSOLUTE_URI: https://{{ wordpress_pma_domain }}/
+      UPLOAD_LIMIT: 64M
+    volumes:
+      - pma_data:/var/www/html
+    networks:
+      - backend
+      - frontend
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "9000"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 40s
+    mem_limit: {{ wordpress_mem_phpmyadmin }}
+
+  nginx:
+    image: {{ wordpress_image_nginx }}
+    restart: unless-stopped
+    depends_on:
+      wordpress:
+        condition: service_healthy
+      phpmyadmin:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./certs:/etc/nginx/certs:ro
+      # The PHP pools own these trees; nginx only needs to read static
+      # files and check that a script exists before proxying.
+      - wordpress_data:/var/www/html:ro
+      - pma_data:/var/www/pma:ro
+    networks:
+      - frontend
+    # Gives `docker compose up --wait` (and so the Ansible run) something
+    # real to block on: the deploy only reports success once TLS answers.
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "443"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
+    mem_limit: {{ wordpress_mem_nginx }}
+
+  # One-shot helper, never started by `up` (tools profile). Ansible runs
+  # it with `compose run --rm` to install WordPress on first deploy.
+  wpcli:
+    image: {{ wordpress_image_wpcli }}
+    profiles: ["tools"]
+    user: "82:82"
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      WORDPRESS_DB_HOST: mariadb:3306
+      WORDPRESS_DB_NAME: ${DB_NAME}
+      WORDPRESS_DB_USER: ${DB_USER}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - wordpress_data:/var/www/html
+    networks:
+      - backend
+
+volumes:
+  # Named volumes, not bind mounts: they survive `down`, reboots and
+  # image upgrades, which is what keeps posts, uploads and accounts.
+  db_data:
+  wordpress_data:
+  pma_data:
+
+networks:
+  frontend:
+  backend:
+    # No route off the host: the database is unreachable from the
+    # internet even if a port were published by mistake.
+    internal: true

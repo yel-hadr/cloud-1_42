@@ -1,0 +1,162 @@
+---
+# Fail before anything is written if the vault was not loaded, rather
+# than rendering an .env full of "None" and debugging it in a container.
+- name: Assert that the vault secrets are available
+  ansible.builtin.assert:
+    that:
+      - vault_wp_db_password | default('') | length > 0
+      - vault_wp_db_root_password | default('') | length > 0
+      - vault_wp_admin_password | default('') | length > 0
+    fail_msg: >-
+      Vault secrets are missing. Check group_vars/webservers/vault.yml and
+      that ansible.cfg's vault_password_file points at a readable file.
+    quiet: true
+
+- name: Create the stack directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  loop:
+    - "{{ wordpress_stack_dir }}"
+    - "{{ wordpress_stack_dir }}/nginx/conf.d"
+
+- name: Create the certificate directory
+  ansible.builtin.file:
+    path: "{{ wordpress_stack_dir }}/certs"
+    state: directory
+    owner: root
+    group: root
+    mode: '0700'
+
+# --- TLS ----------------------------------------------------------------
+# A self-signed certificate is generated once and then reused: the
+# certificate task is skipped while the file is still valid, so re-runs
+# stay idempotent instead of minting a new cert (and a new browser
+# warning) every time.
+
+- name: Generate the TLS private key
+  community.crypto.openssl_privatekey:
+    path: "{{ wordpress_tls_key_path }}"
+    size: 2048
+    owner: root
+    group: root
+    mode: '0600'
+  when: wordpress_tls_self_signed
+  notify: Reload nginx
+
+- name: Generate the certificate signing request
+  community.crypto.openssl_csr:
+    path: "{{ wordpress_stack_dir }}/certs/site.csr"
+    privatekey_path: "{{ wordpress_tls_key_path }}"
+    common_name: "{{ wordpress_domain }}"
+    country_name: "{{ wordpress_tls_country }}"
+    organization_name: "{{ wordpress_tls_org }}"
+    subject_alt_name: "{{ ['DNS:' + wordpress_domain, 'DNS:www.' + wordpress_domain, 'DNS:' + wordpress_pma_domain] }}"
+    owner: root
+    group: root
+    mode: '0644'
+  when: wordpress_tls_self_signed
+
+- name: Generate the self-signed certificate
+  community.crypto.x509_certificate:
+    path: "{{ wordpress_tls_cert_path }}"
+    privatekey_path: "{{ wordpress_tls_key_path }}"
+    csr_path: "{{ wordpress_stack_dir }}/certs/site.csr"
+    provider: selfsigned
+    selfsigned_not_after: "+365d"
+    owner: root
+    group: root
+    mode: '0644'
+  when: wordpress_tls_self_signed
+  notify: Reload nginx
+
+# --- Stack configuration ------------------------------------------------
+
+- name: Render the environment file
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ wordpress_stack_dir }}/.env"
+    owner: root
+    group: root
+    mode: '0600'
+  no_log: true
+  notify: Recreate the stack
+
+- name: Render the Compose file
+  ansible.builtin.template:
+    src: docker-compose.yml.j2
+    dest: "{{ wordpress_stack_dir }}/docker-compose.yml"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Recreate the stack
+
+- name: Render the nginx site configuration
+  ansible.builtin.template:
+    src: site.conf.j2
+    dest: "{{ wordpress_stack_dir }}/nginx/conf.d/default.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload nginx
+
+# --- Bring the stack up -------------------------------------------------
+
+# A web server installed straight on the host holds :80 and :443, and
+# Compose then fails with "address already in use". The containerised
+# nginx is the only thing that should own those ports here.
+- name: Collect service facts
+  ansible.builtin.service_facts:
+
+- name: Stop and disable host web servers
+  ansible.builtin.service:
+    name: "{{ item }}"
+    state: stopped
+    enabled: false
+  loop: "{{ wordpress_conflicting_services }}"
+  when: item + '.service' in ansible_facts.services
+
+- name: Start the stack
+  community.docker.docker_compose_v2:
+    project_src: "{{ wordpress_stack_dir }}"
+    state: present
+    pull: missing
+    wait: true
+    wait_timeout: 300
+  when: not ansible_check_mode
+
+# Config changes must land before WordPress is installed against them.
+- name: Apply pending configuration changes
+  ansible.builtin.meta: flush_handlers
+
+# --- First-run WordPress installation -----------------------------------
+
+- name: Check whether WordPress is already installed
+  ansible.builtin.command:
+    cmd: docker compose --profile tools run --rm -T wpcli wp core is-installed
+    chdir: "{{ wordpress_stack_dir }}"
+  register: wordpress_installed
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+- name: Install WordPress
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --profile tools run --rm -T wpcli wp core install
+      --url={{ wordpress_site_url }}
+      --title={{ wordpress_site_title | quote }}
+      --admin_user={{ wordpress_admin_user | quote }}
+      --admin_password={{ vault_wp_admin_password | quote }}
+      --admin_email={{ wordpress_admin_email | quote }}
+      --skip-email
+    chdir: "{{ wordpress_stack_dir }}"
+  register: wordpress_install
+  changed_when: wordpress_install.rc == 0
+  no_log: true
+  when:
+    - not ansible_check_mode
+    - wordpress_installed.rc | default(1) != 0
