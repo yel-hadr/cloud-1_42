@@ -182,3 +182,25 @@
   when:
     - not ansible_check_mode
     - wordpress_installed.rc | default(1) != 0
+
+# `wp core install` writes the URL it was given at the time into the
+# database, so a site first installed against the bare IP keeps claiming
+# to live there after a domain is configured. The WP_HOME / WP_SITEURL
+# constants in wp-config.php do override it at runtime, which is why the
+# site works either way - but plugins and stored content read the options
+# directly, so leaving them stale is a slow-burning inconsistency.
+# Converging them here means changing wordpress_domain is enough.
+- name: Align the stored site URL with the configured domain
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --profile tools run --rm -T wpcli
+      wp option update {{ item }} {{ wordpress_site_url | quote }}
+    chdir: "{{ wordpress_stack_dir }}"
+  loop:
+    - home
+    - siteurl
+  register: wordpress_url_sync
+  # wp-cli says "Updated" only when the value actually moved; an unchanged
+  # value reports "unchanged", which must not count as a change.
+  changed_when: "'Updated' in wordpress_url_sync.stdout"
+  when: not ansible_check_mode
