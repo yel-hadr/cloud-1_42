@@ -1,11 +1,37 @@
 # {{ ansible_managed }}
+{#
+   Which certificate nginx serves. The self-signed pair always exists, so
+   it is the bootstrap: nginx can bind :443 on a fresh host before any
+   real certificate has been issued. Once certbot has written a live
+   Let's Encrypt cert (wordpress_tls_le_ready, set by a stat in the role)
+   the vhosts switch over to it. Getting this ordering wrong is the
+   classic chicken-and-egg: certbot needs nginx up to answer the ACME
+   challenge, and nginx needs a cert to come up at all.
+#}
+{% if wordpress_tls_letsencrypt and wordpress_tls_le_ready | default(false) %}
+{%   set tls_cert = '/etc/nginx/letsencrypt/live/' ~ wordpress_domain ~ '/fullchain.pem' %}
+{%   set tls_key  = '/etc/nginx/letsencrypt/live/' ~ wordpress_domain ~ '/privkey.pem' %}
+{% else %}
+{%   set tls_cert = '/etc/nginx/certs/fullchain.pem' %}
+{%   set tls_key  = '/etc/nginx/certs/privkey.pem' %}
+{% endif %}
 
-# Everything on :80 is redirected; the site is only served over TLS.
+# Everything on :80 is redirected to TLS - except the ACME challenge,
+# which must stay on plain HTTP because that is where Let's Encrypt looks
+# to prove you control the name. Redirecting it would break renewals.
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
     server_name _;
-    return 301 https://$host$request_uri;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 
 # Requests for a name we do not serve get a flat refusal rather than
@@ -16,8 +42,8 @@ server {
     http2 on;
     server_name _;
 
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     {{ tls_cert }};
+    ssl_certificate_key {{ tls_key }};
 
     return 444;
 }
@@ -28,8 +54,8 @@ server {
     http2 on;
     server_name {{ wordpress_domain }} www.{{ wordpress_domain }};
 
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     {{ tls_cert }};
+    ssl_certificate_key {{ tls_key }};
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_prefer_server_ciphers off;
     ssl_session_cache   shared:SSL:10m;
@@ -84,8 +110,8 @@ server {
     http2 on;
     server_name {{ wordpress_pma_domain }};
 
-    ssl_certificate     /etc/nginx/certs/fullchain.pem;
-    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_certificate     {{ tls_cert }};
+    ssl_certificate_key {{ tls_key }};
     ssl_protocols       TLSv1.2 TLSv1.3;
 
     add_header X-Content-Type-Options nosniff always;

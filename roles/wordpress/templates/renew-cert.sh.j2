@@ -1,0 +1,18 @@
+#!/bin/sh
+# {{ ansible_managed }}
+#
+# Renew the Let's Encrypt certificate and reload nginx so it picks up the
+# new file. `certbot renew` is a no-op until the certificate is inside its
+# renewal window (30 days from expiry), so running this twice a day is
+# cheap and is what certbot itself recommends.
+set -eu
+
+cd {{ wordpress_stack_dir }}
+
+# --quiet keeps the timer's journal entries to actual events.
+docker compose --profile tools run --rm -T certbot renew --quiet
+
+# nginx caches certificates in memory at startup, so a renewed file on
+# disk changes nothing until it is told to re-read. Ignore the failure
+# when nginx happens to be down: the next deploy or boot picks it up.
+docker compose exec -T nginx nginx -s reload || true

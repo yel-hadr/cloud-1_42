@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Twice-daily Let's Encrypt renewal check for {{ wordpress_domain }}
+
+[Timer]
+OnCalendar={{ wordpress_tls_le_renew_oncalendar }}
+# Spread the load on Let's Encrypt's servers rather than hitting them at
+# exactly 03:00 alongside everyone else.
+RandomizedDelaySec=3600
+# If the box was off when the timer was due, run it once it is back up.
+Persistent=true
+
+[Install]
+WantedBy=timers.target

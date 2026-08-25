@@ -2,11 +2,16 @@
 # Non-secret, per-group settings. Secrets live next door in vault.yml,
 # encrypted; nothing in this file is confidential.
 
-# The public name of the site. With no DNS name of your own the server's
-# IP works over HTTPS (with a self-signed-certificate warning). With a
-# free DuckDNS name, set it here and phpMyAdmin answers on pma.<name>.
-wordpress_domain: "{{ ansible_host }}"
+# The public name of the site. phpMyAdmin answers on pma.<name>, so both
+# this name and pma.<name> need A records pointing at the instance.
+# Set back to "{{ ansible_host }}" to fall back to the bare IP.
+wordpress_domain: youssefelhadraoui.tech
 wordpress_site_url: "https://{{ wordpress_domain }}"
+
+# A real certificate, since the domain resolves here. Requires port 80
+# reachable from the internet for the ACME HTTP-01 challenge.
+wordpress_tls_letsencrypt: true
+wordpress_tls_le_email: "ssefy1998@gmail.com"
 
 wordpress_site_title: Cloud-1
 wordpress_admin_user: cloud1admin

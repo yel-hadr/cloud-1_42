@@ -1,0 +1,9 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Renew the Let's Encrypt certificate for {{ wordpress_domain }}
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart={{ wordpress_stack_dir }}/renew-cert.sh

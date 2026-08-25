@@ -1,0 +1,117 @@
+---
+# Issue and renew a real Let's Encrypt certificate over the ACME HTTP-01
+# challenge. Included from main.yml only when wordpress_tls_letsencrypt is
+# true, and only after the stack is up - certbot needs nginx already
+# serving :80 to answer the challenge.
+
+# Let's Encrypt rate-limits failed authorisations to 5 per hostname per
+# hour, so a typo in a DNS record is expensive: burn the budget and you
+# wait an hour to retry. Checking resolution ourselves turns that into an
+# instant, readable failure instead.
+- name: Resolve each certificate name from the target
+  ansible.builtin.command:
+    cmd: "getent ahostsv4 {{ item }}"
+  loop: "{{ wordpress_tls_le_domains }}"
+  register: wordpress_le_dns
+  changed_when: false
+  failed_when: false
+
+- name: Fail early when a certificate name does not point at this host
+  ansible.builtin.assert:
+    that:
+      - item.rc == 0
+      - ansible_host in item.stdout
+    fail_msg: >-
+      {{ item.item }} does not resolve to {{ ansible_host }}
+      (got: {{ item.stdout | default('no answer') | trim | truncate(120) }}).
+      Add an A record pointing it at {{ ansible_host }} and wait for
+      propagation before re-running. Nothing was requested from
+      Let's Encrypt, so no rate limit was consumed.
+    quiet: true
+  loop: "{{ wordpress_le_dns.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Check for an existing Let's Encrypt certificate
+  ansible.builtin.stat:
+    path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
+  register: wordpress_le_cert
+
+# --no-eff-email declines the newsletter prompt; without it certbot waits
+# on stdin and the task hangs. --non-interactive makes any other prompt a
+# failure rather than a hang.
+- name: Request the certificate
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --profile tools run --rm -T certbot
+      certonly --webroot --webroot-path /var/www/certbot
+      {{ wordpress_tls_le_domains | map('regex_replace', '^', '-d ') | join(' ') }}
+      --email {{ wordpress_tls_le_email | quote }}
+      --agree-tos --no-eff-email --non-interactive
+      {{ '--staging' if wordpress_tls_le_staging else '' }}
+    chdir: "{{ wordpress_stack_dir }}"
+  register: wordpress_le_issue
+  changed_when: wordpress_le_issue.rc == 0
+  when: not wordpress_le_cert.stat.exists
+
+- name: Re-check for the certificate now that certbot has run
+  ansible.builtin.stat:
+    path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
+  register: wordpress_le_cert_after
+
+- name: Mark the Let's Encrypt certificate as usable
+  ansible.builtin.set_fact:
+    wordpress_tls_le_ready: "{{ wordpress_le_cert_after.stat.exists }}"
+
+# Re-rendered because the first pass necessarily pointed nginx at the
+# self-signed pair: the real certificate did not exist yet.
+- name: Point nginx at the Let's Encrypt certificate
+  ansible.builtin.template:
+    src: site.conf.j2
+    dest: "{{ wordpress_stack_dir }}/nginx/conf.d/default.conf"
+    owner: root
+    group: root
+    mode: '0644'
+  when: wordpress_tls_le_ready
+  notify: Reload nginx
+
+# --- Renewal ------------------------------------------------------------
+# Certificates last 90 days. A timer that renews and reloads nginx is the
+# difference between a site that keeps working and one that 'mysteriously'
+# breaks two months after the defense.
+
+- name: Install the renewal script
+  ansible.builtin.template:
+    src: renew-cert.sh.j2
+    dest: "{{ wordpress_stack_dir }}/renew-cert.sh"
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the renewal systemd unit
+  ansible.builtin.template:
+    src: certbot-renew.service.j2
+    dest: /etc/systemd/system/certbot-renew.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Install the renewal systemd timer
+  ansible.builtin.template:
+    src: certbot-renew.timer.j2
+    dest: /etc/systemd/system/certbot-renew.timer
+    owner: root
+    group: root
+    mode: '0644'
+  notify: Reload systemd
+
+- name: Flush handlers so systemd sees the new units
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable the renewal timer
+  ansible.builtin.systemd_service:
+    name: certbot-renew.timer
+    state: started
+    enabled: true
+  when: not ansible_check_mode

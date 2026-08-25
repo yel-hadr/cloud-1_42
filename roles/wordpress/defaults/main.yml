@@ -32,14 +32,32 @@ wordpress_mem_wordpress: 256m
 wordpress_mem_phpmyadmin: 128m
 wordpress_mem_nginx: 64m
 
-# TLS. With no certificate supplied the role generates a self-signed one,
-# which is enough for the mandatory part; point these at real files (or a
-# certbot-managed path) to serve a trusted certificate instead.
+# TLS. A self-signed certificate is always generated: nginx cannot bind
+# :443 without one, so it is what lets the stack boot on a brand-new host
+# before any real certificate exists.
 wordpress_tls_cert_path: "{{ wordpress_stack_dir }}/certs/fullchain.pem"
 wordpress_tls_key_path: "{{ wordpress_stack_dir }}/certs/privkey.pem"
 wordpress_tls_self_signed: true
 wordpress_tls_country: MA
 wordpress_tls_org: cloud1
+
+# Let's Encrypt. Off by default because it only works on a host with a
+# real domain pointed at it and port 80 reachable from the internet -
+# neither is true of a bare IP. Turn on in group_vars once DNS resolves.
+wordpress_tls_letsencrypt: false
+wordpress_tls_le_email: "{{ wordpress_admin_email }}"
+# Let's Encrypt rate-limits failures hard (5 per account/hostname/hour).
+# Flip this to true to rehearse against their staging CA, which issues an
+# untrusted cert but has far looser limits.
+wordpress_tls_le_staging: false
+wordpress_tls_le_dir: "{{ wordpress_stack_dir }}/letsencrypt"
+# Names on the certificate. Every one of these must already resolve to
+# this host or the whole issuance fails, not just that name.
+wordpress_tls_le_domains: >-
+  {{ [wordpress_domain, 'www.' + wordpress_domain, wordpress_pma_domain] }}
+wordpress_image_certbot: certbot/certbot:latest
+# Renewal check twice a day, the interval certbot itself recommends.
+wordpress_tls_le_renew_oncalendar: "*-*-* 03,15:00:00"
 
 # Host services that would hold ports 80/443 before the stack's own nginx
 # can bind them. They are stopped and disabled, not removed.

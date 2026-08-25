@@ -108,6 +108,10 @@ services:
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./certs:/etc/nginx/certs:ro
+      # Let's Encrypt material, and the ACME challenge webroot certbot
+      # drops tokens into. Both read-only here: nginx only serves them.
+      - ./letsencrypt:/etc/nginx/letsencrypt:ro
+      - certbot_webroot:/var/www/certbot:ro
       # The PHP pools own these trees; nginx only needs to read static
       # files and check that a script exists before proxying.
       - wordpress_data:/var/www/html:ro
@@ -143,12 +147,24 @@ services:
     networks:
       - backend
 
+  # One-shot, like wpcli: never started by `up`. Ansible runs it to issue
+  # the certificate, and a systemd timer runs `renew` twice a day.
+  certbot:
+    image: {{ wordpress_image_certbot }}
+    profiles: ["tools"]
+    volumes:
+      - ./letsencrypt:/etc/letsencrypt
+      - certbot_webroot:/var/www/certbot
+    networks:
+      - frontend
+
 volumes:
   # Named volumes, not bind mounts: they survive `down`, reboots and
   # image upgrades, which is what keeps posts, uploads and accounts.
   db_data:
   wordpress_data:
   pma_data:
+  certbot_webroot:
 
 networks:
   frontend:

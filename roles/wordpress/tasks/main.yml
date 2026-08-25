@@ -22,6 +22,7 @@
   loop:
     - "{{ wordpress_stack_dir }}"
     - "{{ wordpress_stack_dir }}/nginx/conf.d"
+    - "{{ wordpress_tls_le_dir }}"
 
 - name: Create the certificate directory
   ansible.builtin.file:
@@ -74,6 +75,18 @@
   notify: Reload nginx
 
 # --- Stack configuration ------------------------------------------------
+
+# Decides which certificate the nginx template points at. On the very
+# first run this is false and nginx boots on the self-signed pair; the
+# letsencrypt tasks below flip it and re-render once a real cert exists.
+- name: Check whether a Let's Encrypt certificate is already present
+  ansible.builtin.stat:
+    path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
+  register: wordpress_le_existing
+
+- name: Record whether the Let's Encrypt certificate is usable
+  ansible.builtin.set_fact:
+    wordpress_tls_le_ready: "{{ wordpress_le_existing.stat.exists }}"
 
 - name: Render the environment file
   ansible.builtin.template:
@@ -131,6 +144,15 @@
 # Config changes must land before WordPress is installed against them.
 - name: Apply pending configuration changes
   ansible.builtin.meta: flush_handlers
+
+# --- Trusted TLS --------------------------------------------------------
+# Deliberately after the stack is up: the ACME HTTP-01 challenge is
+# answered by the nginx we just started.
+- name: Obtain and maintain a Let's Encrypt certificate
+  ansible.builtin.include_tasks: letsencrypt.yml
+  when:
+    - wordpress_tls_letsencrypt
+    - not ansible_check_mode
 
 # --- First-run WordPress installation -----------------------------------
 
