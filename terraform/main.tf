@@ -127,6 +127,13 @@ resource "aws_instance" "web" {
     encrypted   = true
   }
 
+  # Disable IMDSv1 - only session-based IMDSv2 is allowed. This prevents
+  # SSRF-based metadata credential theft (CKV_AWS_79).
+  metadata_options {
+    http_endpoint = "enabled"
+    http_tokens   = "required"
+  }
+
   tags = { Name = "cloud1" }
 }
 
