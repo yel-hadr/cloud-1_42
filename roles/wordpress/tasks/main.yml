@@ -32,11 +32,31 @@
     group: root
     mode: '0700'
 
+# Decides which certificate the nginx template points at. On the very
+# first run this is false and nginx boots on the self-signed pair; the
+# letsencrypt tasks below flip it and re-render once a real cert exists.
+- name: Check whether a Let's Encrypt certificate is already present
+  ansible.builtin.stat:
+    path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
+  register: wordpress_le_existing
+
+- name: Record whether the Let's Encrypt certificate is usable
+  ansible.builtin.set_fact:
+    wordpress_tls_le_ready: "{{ wordpress_le_existing.stat.exists }}"
+    wordpress_tls_bootstrap_needed: >-
+      {{ wordpress_tls_self_signed
+         or (wordpress_tls_letsencrypt and not wordpress_le_existing.stat.exists) }}
+
 # --- TLS ----------------------------------------------------------------
 # A self-signed certificate is generated once and then reused: the
 # certificate task is skipped while the file is still valid, so re-runs
 # stay idempotent instead of minting a new cert (and a new browser
 # warning) every time.
+#
+# The bootstrap pair is minted even with wordpress_tls_self_signed off
+# whenever Let's Encrypt is on and has not issued yet: nginx is started
+# before certbot and cannot bind :443 without a certificate, so skipping
+# it here would crash-loop nginx and leave the ACME challenge unanswered.
 
 - name: Generate the TLS private key
   community.crypto.openssl_privatekey:
@@ -45,7 +65,7 @@
     owner: root
     group: root
     mode: '0600'
-  when: wordpress_tls_self_signed
+  when: wordpress_tls_bootstrap_needed | bool
   notify: Reload nginx
 
 - name: Generate the certificate signing request
@@ -59,7 +79,7 @@
     owner: root
     group: root
     mode: '0644'
-  when: wordpress_tls_self_signed
+  when: wordpress_tls_bootstrap_needed | bool
 
 - name: Generate the self-signed certificate
   community.crypto.x509_certificate:
@@ -71,22 +91,10 @@
     owner: root
     group: root
     mode: '0644'
-  when: wordpress_tls_self_signed
+  when: wordpress_tls_bootstrap_needed | bool
   notify: Reload nginx
 
 # --- Stack configuration ------------------------------------------------
-
-# Decides which certificate the nginx template points at. On the very
-# first run this is false and nginx boots on the self-signed pair; the
-# letsencrypt tasks below flip it and re-render once a real cert exists.
-- name: Check whether a Let's Encrypt certificate is already present
-  ansible.builtin.stat:
-    path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
-  register: wordpress_le_existing
-
-- name: Record whether the Let's Encrypt certificate is usable
-  ansible.builtin.set_fact:
-    wordpress_tls_le_ready: "{{ wordpress_le_existing.stat.exists }}"
 
 - name: Render the environment file
   ansible.builtin.template:
@@ -153,6 +161,10 @@
   when:
     - wordpress_tls_letsencrypt
     - not ansible_check_mode
+
+- name: Remove the renewal machinery when Let's Encrypt is turned off
+  ansible.builtin.include_tasks: letsencrypt-teardown.yml
+  when: not wordpress_tls_letsencrypt
 
 # --- First-run WordPress installation -----------------------------------
 

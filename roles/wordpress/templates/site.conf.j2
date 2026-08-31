@@ -16,9 +16,28 @@
 {%   set tls_key  = '/etc/nginx/certs/privkey.pem' %}
 {% endif %}
 
-# Everything on :80 is redirected to TLS - except the ACME challenge,
+# The names we serve are redirected to TLS - except the ACME challenge,
 # which must stay on plain HTTP because that is where Let's Encrypt looks
 # to prove you control the name. Redirecting it would break renewals.
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {{ wordpress_domain }} www.{{ wordpress_domain }} {{ wordpress_pma_domain }};
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type "text/plain";
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+# A name we do not serve gets the same flat refusal on :80 as it does on
+# :443, rather than a redirect that only refuses it one round-trip later.
+# The challenge location stays open so a name can still be validated
+# before it is added to the vhosts above.
 server {
     listen 80 default_server;
     listen [::]:80 default_server;
@@ -30,7 +49,7 @@ server {
     }
 
     location / {
-        return 301 https://$host$request_uri;
+        return 444;
     }
 }
 

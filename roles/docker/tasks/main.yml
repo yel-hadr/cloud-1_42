@@ -52,10 +52,20 @@
       using '{{ docker_apt_codename_fallback }}' packages instead.
   when: docker_apt_suite != docker_apt_codename
 
+- name: Fail on an architecture Docker's repository does not cover
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['architecture'] in docker_apt_arch_map
+    fail_msg: >-
+      Architecture '{{ ansible_facts['architecture'] }}' is not supported by
+      this role. Add it to docker_apt_arch_map if Docker publishes packages
+      for it.
+    quiet: true
+
 - name: Add the Docker apt repository
   ansible.builtin.apt_repository:
     repo: >-
-      deb [arch={{ 'amd64' if ansible_facts['architecture'] == 'x86_64' else 'arm64' }}
+      deb [arch={{ docker_apt_arch_map[ansible_facts['architecture']] }}
       signed-by=/etc/apt/keyrings/docker.asc]
       https://download.docker.com/linux/ubuntu {{ docker_apt_suite }} stable
     filename: docker

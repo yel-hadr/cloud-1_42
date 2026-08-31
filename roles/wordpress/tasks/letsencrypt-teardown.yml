@@ -1,0 +1,29 @@
+---
+# Turning wordpress_tls_letsencrypt back off has to remove the renewal
+# machinery, not just stop installing it. Left behind, the timer keeps
+# firing twice a day, renewing a certificate nothing serves and reloading
+# nginx for no reason.
+
+- name: Check whether the renewal timer is installed
+  ansible.builtin.stat:
+    path: /etc/systemd/system/certbot-renew.timer
+  register: wordpress_le_timer_unit
+
+- name: Stop and disable the renewal timer
+  ansible.builtin.systemd_service:
+    name: certbot-renew.timer
+    state: stopped
+    enabled: false
+  when:
+    - wordpress_le_timer_unit.stat.exists
+    - not ansible_check_mode
+
+- name: Remove the renewal units and script
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/certbot-renew.timer
+    - /etc/systemd/system/certbot-renew.service
+    - "{{ wordpress_stack_dir }}/renew-cert.sh"
+  notify: Reload systemd

@@ -7,6 +7,14 @@
 docker_apt_codename: "{{ ansible_facts['distribution_release'] }}"
 docker_apt_codename_fallback: noble
 
+# Host architecture -> Docker's apt architecture name. The repository has
+# no "everything else" suite, so an unmapped architecture is an error the
+# role reports rather than a confusing apt resolution failure later.
+docker_apt_arch_map:
+  x86_64: amd64
+  aarch64: arm64
+  armv7l: armhf
+
 docker_packages:
   - docker-ce
   - docker-ce-cli
