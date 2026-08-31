@@ -6,3 +6,6 @@
 *.retry
 .env
 facts.json
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+server_key.pub

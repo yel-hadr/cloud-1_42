@@ -1,8 +1,9 @@
 # cloud-1_42
 
 Automated deployment of an *Inception*-equivalent WordPress stack onto a remote
-cloud instance, driven entirely by Ansible. One process per container, TLS
-terminated at nginx, name-based routing, no secrets in git.
+cloud instance. Terraform provisions the infrastructure, Ansible configures the
+host. One process per container, TLS terminated at nginx, name-based routing,
+no secrets in git.
 
 Target: AWS EC2 (`eu-west-3`), Ubuntu, reached over SSH as `ubuntu`.
 
@@ -43,6 +44,7 @@ has no route off the host even if a port were published by mistake.
 ## Layout
 
 ```
+Makefile                       provision -> regenerate inventory -> configure
 ansible.cfg                    connection defaults, vault password file
 inventory.yaml                 the webservers group -> cloud1 (ansible_host = EC2 IP)
 site.yml                       top-level playbook: common, security, docker, wordpress
@@ -56,6 +58,8 @@ roles/common/     baseline: packages, timezone, hostname, admin user
 roles/security/   ufw (22/80/443 only), fail2ban, unattended-upgrades, sshd hardening
 roles/docker/     Docker Engine + Compose plugin from Docker's apt repo, enabled at boot
 roles/wordpress/  TLS material, the Compose stack, nginx vhosts, first-run WP install
+
+terraform/        VPC, subnet, IGW, route table, security group, key pair, instance, EIP
 ```
 
 ### Where is docker-compose.yml?
@@ -73,13 +77,22 @@ ansible webservers -b -a 'cat /opt/cloud1/docker-compose.yml'
 ## Usage
 
 ```bash
+make up                                  # provision, regenerate inventory, configure
+make check                               # dry run against the current host
+make lint                                # ansible-lint + terraform fmt/validate
+make down                                # destroy everything (stops the billing)
+```
+
+Ansible on its own, against a host that already exists:
+
+```bash
 ansible all -m ping                      # connectivity check
 ansible-playbook site.yml --check --diff # dry run
 ansible-playbook site.yml                # apply
 ansible-lint --profile production        # must stay clean
 ```
 
-Secrets (the live vault is the one under `group_vars/`):
+Secrets:
 
 ```bash
 ansible-vault view group_vars/webservers/vault.yml
@@ -176,6 +189,32 @@ firewall from the host's ufw: the host can be listening and answering locally
 while AWS silently drops every inbound packet. If issuance fails, check there
 first.
 
+## Infrastructure
+
+`terraform/` builds everything the playbook then configures: a VPC with one
+public subnet, an internet gateway and route table, a security group opening
+only 22/80/443, a key pair derived from `server_key.pem`, the instance itself,
+and an Elastic IP.
+
+The Elastic IP is the reason `make up` is worth using over a hand-made box. A
+stop/start hands back a different public address, which breaks both the DNS
+records for the domain and the `ansible_host` in `inventory.yaml` - and a stale
+`ansible_host` is not a cosmetic problem, because the Let's Encrypt preflight
+asserts that every certificate name resolves to it. Pinning the address removes
+that whole class of failure.
+
+`make inventory` closes the loop: it rewrites `inventory.yaml` from
+`terraform output -raw instance_public_ip`, so Ansible always targets the
+instance that actually exists rather than an address typed in by hand.
+
+### Terraform vs Ansible
+
+Terraform is **stateful**: `terraform.tfstate` is its record of which real
+resources it owns, and it diffs desired-against-recorded to decide what to
+create, change or destroy. Ansible is **stateless**: it keeps no record between
+runs and instead re-asserts the desired state against whatever it finds on the
+host each time. That is why Terraform can delete a resource and Ansible cannot.
+
 ## Requirements checklist
 
 | Subject requirement | Where it is met |
@@ -220,5 +259,6 @@ first.
 - Re-running `site.yml` must always report `changed=0`. If it doesn't, a task is
   misreporting its state - usually a `command`/`shell` task needing
   `changed_when`.
-- The `vault.yml` at the repository root is a leftover from week 1 and is not
-  loaded by any play. The vault in use is `group_vars/webservers/vault.yml`.
+- The only vault is `group_vars/webservers/vault.yml`, loaded by group_vars
+  rather than a `vars_files:` entry. The week 1 leftover at the repository root
+  was removed; nothing loaded it.
