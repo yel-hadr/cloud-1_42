@@ -31,9 +31,19 @@ inventory:
 # Wait for the instance to accept SSH before configuring it. A freshly
 # created EC2 host needs cloud-init and sshd to finish before Ansible can
 # connect; without this step `make up` fails on first run.
+# Bounded to 60 attempts (≈5 min) so a persistent failure does not hang.
 wait:
 	@echo "Waiting for SSH on the new instance…"
-	@until ansible all -i inventory.yaml -m ansible.builtin.wait_for_connection -a 'timeout=300' 2>/dev/null; do sleep 5; done
+	@n=0; \
+	until ansible all -i inventory.yaml -m ansible.builtin.wait_for_connection -a 'timeout=10' 2>/dev/null; do \
+		n=$$((n + 1)); \
+		if [ $$n -ge 60 ]; then \
+			echo "ERROR: instance did not become SSH-reachable after 60 attempts."; \
+			echo "Check the key pair, security group, and instance console output."; \
+			exit 1; \
+		fi; \
+		sleep 5; \
+	done
 	@echo "Instance is reachable."
 
 configure:
