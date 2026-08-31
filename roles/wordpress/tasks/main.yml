@@ -40,12 +40,30 @@
     path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
   register: wordpress_le_existing
 
+# Presence is not the same as usability. The teardown deliberately keeps
+# the certificate lineage when Let's Encrypt is switched off, so a cert
+# can sit here long past its notAfter. Marking that "ready" would point
+# nginx at it and reload - serving an expired certificate to browsers
+# before the issuance tasks below ever get a chance to replace it.
+- name: Read the existing certificate to check its validity
+  community.crypto.x509_certificate_info:
+    path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
+  register: wordpress_le_existing_info
+  when: wordpress_le_existing.stat.exists
+
 - name: Record whether the Let's Encrypt certificate is usable
   ansible.builtin.set_fact:
-    wordpress_tls_le_ready: "{{ wordpress_le_existing.stat.exists }}"
+    wordpress_tls_le_ready: >-
+      {{ wordpress_le_existing.stat.exists
+         and not (wordpress_le_existing_info.expired | default(true)) }}
+
+# An expired certificate is no better than a missing one for binding :443,
+# so it needs the bootstrap pair minted just the same.
+- name: Record whether a bootstrap certificate must be minted
+  ansible.builtin.set_fact:
     wordpress_tls_bootstrap_needed: >-
       {{ wordpress_tls_self_signed
-         or (wordpress_tls_letsencrypt and not wordpress_le_existing.stat.exists) }}
+         or (wordpress_tls_letsencrypt and not wordpress_tls_le_ready | bool) }}
 
 # --- TLS ----------------------------------------------------------------
 # A self-signed certificate is generated once and then reused: the

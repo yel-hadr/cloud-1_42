@@ -6,3 +6,16 @@
 *.retry
 .env
 facts.json
+<<<<<<< HEAD
+
+# Reference material and scratch notes kept locally, not part of the deliverable.
+en.subject.pdf
+subject.txt
+pr_comments.txt
+pr2_comments.txt
+||||||| parent of bb51f21 (Provision the infrastructure with Terraform)
+=======
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+server_key.pub
+>>>>>>> bb51f21 (Provision the infrastructure with Terraform)
