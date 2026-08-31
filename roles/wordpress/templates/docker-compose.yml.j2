@@ -55,7 +55,7 @@ services:
             $$_SERVER['HTTPS'] = 'on';
         }
     volumes:
-      - wordpress_data:/var/www/html
+      - wp_data:/var/www/html
     networks:
       - backend
       - frontend
@@ -114,7 +114,7 @@ services:
       - certbot_webroot:/var/www/certbot:ro
       # The PHP pools own these trees; nginx only needs to read static
       # files and check that a script exists before proxying.
-      - wordpress_data:/var/www/html:ro
+      - wp_data:/var/www/html:ro
       - pma_data:/var/www/pma:ro
     networks:
       - frontend
@@ -143,7 +143,7 @@ services:
       WORDPRESS_DB_USER: ${DB_USER}
       WORDPRESS_DB_PASSWORD: ${DB_PASSWORD}
     volumes:
-      - wordpress_data:/var/www/html
+      - wp_data:/var/www/html
     networks:
       - backend
 
@@ -162,7 +162,10 @@ volumes:
   # Named volumes, not bind mounts: they survive `down`, reboots and
   # image upgrades, which is what keeps posts, uploads and accounts.
   db_data:
-  wordpress_data:
+  # Named wp_data, not wordpress_data: the existing deployment's volume is
+  # cloud1_wp_data, and a new name would silently start against an empty
+  # one and strand the uploads.
+  wp_data:
   pma_data:
   certbot_webroot:
 
