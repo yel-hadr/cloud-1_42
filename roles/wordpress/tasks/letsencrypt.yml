@@ -55,7 +55,40 @@
     wordpress_le_missing_names: >-
       {{ wordpress_tls_le_domains
          | difference(wordpress_le_cert_info.subject_alt_name | default([])
-                      | map('regex_replace', '^DNS:', '') | list) }}
+                       | map('regex_replace', '^DNS:', '') | list) }}
+
+# If Let's Encrypt was disabled for a while and the renewal timer was
+# torn down, the retained certificate may have expired. community.crypto
+# gives us the `expired` flag directly - no date arithmetic needed.
+- name: Check whether the existing certificate is expired or near-expiry
+  ansible.builtin.command:
+    cmd: >-
+      openssl x509 -in {{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem
+      -checkend 2592000 -noout
+  register: wordpress_le_cert_expiry_check
+  changed_when: false
+  failed_when: false
+  when: wordpress_le_cert.stat.exists
+
+# openssl x509 -checkend N exits 1 if the cert expires within N seconds.
+# 2592000 = 30 days, matching certbot's own renewal window.
+- name: Force renewal of an expiring or expired certificate
+  ansible.builtin.command:
+    cmd: >-
+      docker compose --profile tools run --rm -T certbot
+      certonly --webroot --webroot-path /var/www/certbot
+      --cert-name {{ wordpress_domain | quote }}
+      {{ wordpress_tls_le_domains | map('regex_replace', '^', '-d ') | join(' ') }}
+      --email {{ wordpress_tls_le_email | quote }}
+      --agree-tos --no-eff-email --non-interactive --force-renewal
+      {{ '--staging' if wordpress_tls_le_staging else '' }}
+    chdir: "{{ wordpress_stack_dir }}"
+  register: wordpress_le_renew
+  changed_when: wordpress_le_renew.rc == 0
+  when:
+    - wordpress_le_cert.stat.exists
+    - wordpress_le_missing_names | length == 0
+    - wordpress_le_cert_expiry_check.rc | default(0) != 0
 
 # --no-eff-email declines the newsletter prompt; without it certbot waits
 # on stdin and the task hangs. --non-interactive makes any other prompt a
