@@ -77,7 +77,8 @@ ansible webservers -b -a 'cat /opt/cloud1/docker-compose.yml'
 ## Usage
 
 ```bash
-make up                                  # provision, regenerate inventory, configure
+make up                                  # provision, check DNS, wait for SSH, configure
+make dns                                 # verify the A records point at this instance
 make check                               # dry run against the current host
 make lint                                # ansible-lint + terraform fmt/validate
 make down                                # destroy everything (stops the billing)
@@ -161,8 +162,11 @@ certificate. So:
    challenge too would break renewals).
 3. certbot runs as a one-shot `tools`-profile container and writes a real
    certificate into `/opt/cloud1/letsencrypt`.
-4. The role stats the live directory, sets `wordpress_tls_le_ready`, re-renders
-   the vhosts onto the real certificate and reloads nginx.
+4. The role reads the certificate back, sets `wordpress_tls_le_ready` only if it
+   is both present *and* still inside its validity window, then re-renders the
+   vhosts onto it and reloads nginx. Presence alone is not enough: turning
+   Let's Encrypt off keeps the lineage on disk, so a certificate can outlive
+   its notAfter and must not be served.
 
 Before any of that, a preflight resolves every requested name from the target
 and fails with a readable message if one does not point here. Let's Encrypt
@@ -206,6 +210,14 @@ that whole class of failure.
 `make inventory` closes the loop: it rewrites `inventory.yaml` from
 `terraform output -raw instance_public_ip`, so Ansible always targets the
 instance that actually exists rather than an address typed in by hand.
+
+`make dns` then refuses to go further until the A records agree with that
+address. The playbook's own preflight catches the same mistake, but only after
+the whole stack is already up, which leaves the site running on its self-signed
+bootstrap certificate. Checking it here fails before anything is deployed. The
+records are not managed in Terraform because the domain is registered outside
+AWS, so there is no Route 53 zone to write them into. The check is skipped when
+`wordpress_tls_letsencrypt` is not `true`.
 
 ### Terraform vs Ansible
 
