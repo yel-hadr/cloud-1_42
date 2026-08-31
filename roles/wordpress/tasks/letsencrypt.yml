@@ -20,10 +20,10 @@
   ansible.builtin.assert:
     that:
       - item.rc == 0
-      # Match the address column as a whole token. A substring test on the
-      # raw output passes 10.0.0.1 against a host that resolves to
-      # 10.0.0.10, which is exactly the typo this check exists to catch.
-      - ansible_host in (item.stdout_lines | map('split') | map('first') | list)
+      # Match the exact set of resolved addresses. If there are other A or AAAA
+      # records pointing elsewhere, Let's Encrypt might validate against them
+      # and fail, consuming the rate limit.
+      - (item.stdout_lines | map('split') | map('first') | unique | list) == [ansible_host]
     fail_msg: >-
       {{ item.item }} does not resolve to {{ ansible_host }}
       (got: {{ item.stdout | default('no answer') | trim | truncate(120) }}).
