@@ -6,3 +6,9 @@
 *.retry
 .env
 facts.json
+
+# Reference material and scratch notes kept locally, not part of the deliverable.
+en.subject.pdf
+subject.txt
+pr_comments.txt
+pr2_comments.txt

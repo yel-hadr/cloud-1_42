@@ -113,9 +113,21 @@
     path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
   register: wordpress_le_cert_after
 
+# Same reasoning as the readiness check in main.yml: only a certificate
+# that is both present and still inside its validity window may be handed
+# to nginx. Re-read it rather than trusting that certbot did its job, so a
+# renewal that silently left the old file in place cannot be served.
+- name: Re-read the certificate to confirm it is now valid
+  community.crypto.x509_certificate_info:
+    path: "{{ wordpress_tls_le_dir }}/live/{{ wordpress_domain }}/fullchain.pem"
+  register: wordpress_le_cert_after_info
+  when: wordpress_le_cert_after.stat.exists
+
 - name: Mark the Let's Encrypt certificate as usable
   ansible.builtin.set_fact:
-    wordpress_tls_le_ready: "{{ wordpress_le_cert_after.stat.exists }}"
+    wordpress_tls_le_ready: >-
+      {{ wordpress_le_cert_after.stat.exists
+         and not (wordpress_le_cert_after_info.expired | default(true)) }}
 
 # Re-rendered because the first pass necessarily pointed nginx at the
 # self-signed pair: the real certificate did not exist yet.
