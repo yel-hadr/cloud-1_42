@@ -6,6 +6,9 @@
 *.retry
 .env
 facts.json
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+server_key.pub
 
 # Reference material and scratch notes kept locally, not part of the deliverable.
 en.subject.pdf
