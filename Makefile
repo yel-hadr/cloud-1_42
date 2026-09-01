@@ -13,7 +13,12 @@ VARS    := group_vars/webservers/vars.yml
 DOMAIN  := $(shell awk '/^wordpress_domain:/ {print $$2}' $(VARS))
 LE      := $(shell awk '/^wordpress_tls_letsencrypt:/ {print $$2}' $(VARS))
 
-.PHONY: up down provision inventory dns wait configure check lint fmt destroy-check
+.PHONY: up down provision inventory dns wait configure check lint fmt
+
+# Every stage of `up` consumes what the previous one produced: inventory
+# reads terraform's output, dns and wait read inventory. `make -j` would
+# otherwise be free to start them concurrently.
+.NOTPARALLEL:
 
 up: provision inventory dns wait configure
 
@@ -42,6 +47,13 @@ inventory:
 #
 # Deliberately not managed in Terraform: the domain is registered outside
 # AWS, so there is no Route 53 zone to write these records into.
+#
+# `ahostsv4`, not `ahosts`, even though the playbook's own assertion matches
+# on both families. This runs on the operator's machine, and a resolver with
+# DNS64 enabled synthesises an AAAA (64:ff9b::/96) for every name that has
+# only an A record - which would fail this gate on a perfectly correct zone.
+# The playbook's check runs on the instance itself and stays strict, so a
+# genuinely stray AAAA record is still caught before certbot is called.
 dns:
 ifeq ($(LE),true)
 	@IP=$$($(TF) output -raw instance_public_ip) && \
@@ -70,7 +82,8 @@ endif
 # Wait for the instance to accept SSH before configuring it. A freshly
 # created EC2 host needs cloud-init and sshd to finish before Ansible can
 # connect; without this step `make up` fails on first run.
-# Bounded to 60 attempts (≈5 min) so a persistent failure does not hang.
+# Bounded to 60 attempts - each one up to timeout=10 plus a 5s sleep, so ~15
+# minutes at worst - so a persistent failure does not hang forever.
 wait:
 	@echo "Waiting for SSH on the new instance…"
 	@n=0; \

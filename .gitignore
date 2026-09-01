@@ -6,7 +6,7 @@
 *.retry
 .env
 facts.json
-<<<<<<< HEAD
+server_key.pub
 
 # Reference material and scratch notes kept locally, not part of the deliverable.
 en.subject.pdf
