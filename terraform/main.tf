@@ -134,6 +134,16 @@ resource "aws_instance" "web" {
     http_tokens   = "required"
   }
 
+  # data.aws_ami.ubuntu re-resolves to whatever Canonical published most
+  # recently, and `ami` forces replacement. Without this, a routine `make up`
+  # taken after a new image lands would destroy the running box - and the
+  # WordPress database on its root volume - just to rebuild it on a newer
+  # base. Rebuilding on a newer image stays possible, but only deliberately,
+  # via `make down` then `make up`.
+  lifecycle {
+    ignore_changes = [ami]
+  }
+
   tags = { Name = "cloud1" }
 }
 
