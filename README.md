@@ -217,6 +217,32 @@ fresh address with all three A records pointing at nothing. As written,
 teardown destroys the association and leaves the address allocated, so the
 DNS records set up once stay correct across any number of down/up cycles.
 
+If you are carrying a `terraform.tfstate` from before this change, migrate it
+**before** the next `make up`. That state still records `aws_eip.web` as a
+managed resource, and applying a configuration that no longer declares it is
+read as "destroy this" - releasing the very address the A records point at.
+Drop it from the state and adopt the association instead:
+
+```sh
+cd terraform
+ALLOC=$(aws ec2 describe-addresses --region eu-west-3 \
+  --filters Name=tag:Name,Values=cloud1-eip \
+  --query 'Addresses[0].AllocationId' --output text)
+ASSOC=$(aws ec2 describe-addresses --region eu-west-3 \
+  --filters Name=tag:Name,Values=cloud1-eip \
+  --query 'Addresses[0].AssociationId' --output text)
+
+terraform state rm aws_eip.web            # state only - touches nothing in AWS
+terraform import aws_eip_association.web "$ASSOC"
+terraform plan                            # must say: No changes
+```
+
+`terraform state rm` only forgets the resource; the address itself stays
+allocated and attached throughout. A state created fresh from this revision
+needs none of the above. Either way, `terraform plan -destroy` is the check
+that it worked - `aws_eip_association.web` should appear in the list and the
+allocation should not.
+
 The trade is money: AWS bills an allocated IPv4 address whether or not it is
 attached, roughly $3.60 a month while the stack is down. On the day the
 project is retired, hand it back:

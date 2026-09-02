@@ -4,10 +4,15 @@
 # targets the instance that actually exists rather than a stale address.
 #
 # Run it directly (./scripts/update-inventory.sh) or via `make inventory`;
-# `make up` runs it after every provision. Safe to re-run: it rewrites the
-# file only when the address has actually changed.
+# `make up` runs it after every provision. Safe to re-run: the file is
+# left untouched when it already holds exactly what would be written.
 #
 # Usage: scripts/update-inventory.sh [inventory-file]
+#
+# The target file is *generated*, not merged: whatever is there is replaced
+# wholesale by the single-host document below. Point the optional argument
+# only at a file you are content to have overwritten - never at a
+# hand-maintained inventory carrying other hosts or groups.
 
 set -euo pipefail
 
@@ -29,16 +34,23 @@ fi
 
 # Guard against a half-written state handing us an error string or a
 # hostname; everything downstream (the DNS gate, the TLS preflight)
-# compares this value against resolved A records.
-[[ $ip =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "'$ip' is not an IPv4 address."
+# compares this value against resolved A records. The shape check alone
+# would pass 999.1.1.1, so each octet is range-checked too - 10# forces
+# base 10, otherwise a zero-padded octet would be read as octal.
+valid_ipv4() {
+	local addr=$1 octet
+	[[ $addr =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]] || return 1
+	for octet in ${addr//./ }; do
+		((10#$octet <= 255)) || return 1
+	done
+}
 
-if [ -f "$inventory" ] && grep -qF "ansible_host: $ip" "$inventory"; then
-	echo "$(basename "$inventory") already points at $ip"
-	exit 0
-fi
+valid_ipv4 "$ip" || die "'$ip' is not an IPv4 address."
 
-# Written through a temporary file so an interrupted run cannot leave a
-# truncated inventory behind for the next playbook to read.
+# Rendered before anything is compared or moved, so the idempotence check
+# below is a whole-file comparison against exactly what would be written.
+# Matching on the address alone would let a file whose cloud1 entry is stale
+# - but which mentions the current address anywhere else - be left in place.
 tmp=$(mktemp "$inventory.XXXXXX")
 trap 'rm -f "$tmp"' EXIT
 
@@ -56,6 +68,13 @@ webservers:
       ansible_host: $ip
 YAML
 
+if cmp -s "$tmp" "$inventory" 2>/dev/null; then
+	echo "$(basename "$inventory") already points at $ip"
+	exit 0
+fi
+
+# Moved into place rather than written in place, so an interrupted run
+# cannot leave a truncated inventory behind for the next playbook to read.
 chmod 644 "$tmp"
 mv "$tmp" "$inventory"
 trap - EXIT

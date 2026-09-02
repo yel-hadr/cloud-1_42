@@ -166,6 +166,12 @@ resource "aws_instance" "web" {
 #
 # and delete it the same way (`release-address`) on the day the project is
 # retired - AWS bills an allocated IPv4 address whether it is attached or not.
+#
+# The tag has to be unique in the region: a second allocation carrying
+# Name=cloud1-eip makes this lookup ambiguous and Terraform refuses to plan
+# with "multiple EC2 EIPs matched". `aws ec2 describe-addresses --region
+# eu-west-3 --filters Name=tag:Name,Values=cloud1-eip` should return exactly
+# one address; release the spare if it returns more.
 data "aws_eip" "web" {
   tags = { Name = "cloud1-eip" }
 }
