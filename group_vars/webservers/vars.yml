@@ -4,8 +4,9 @@
 
 # The public name of the site. phpMyAdmin answers on pma.<name>, so both
 # this name and pma.<name> need A records pointing at the instance.
-# Set back to "{{ ansible_host }}" to fall back to the bare IP.
-wordpress_domain: youssefelhadraoui.tech
+# Set back to "{{ ansible_host }}" to fall bagantck to the bare IP.
+# wordpress_domain: youssefelhadraoui.tech
+wordpress_domain: melgand.tech
 wordpress_site_url: "https://{{ wordpress_domain }}"
 
 # A real certificate, since the domain resolves here. Requires port 80
