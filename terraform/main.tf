@@ -149,11 +149,31 @@ resource "aws_instance" "web" {
 
 # A stop/start would otherwise hand back a different public IP, breaking the
 # DNS records for youssefelhadraoui.tech. The EIP pins the address.
-resource "aws_eip" "web" {
-  domain   = "vpc"
-  instance = aws_instance.web.id
-
+#
+# The *allocation* is deliberately not a resource here. `make down` destroys
+# this whole state - instance, subnet, VPC - and an EIP owned by it would be
+# released along with them, handing the address back to AWS. The next
+# `make up` would then come back on a different one and every A record for
+# the domain would have to be re-pointed by hand. Looking it up instead means
+# teardown only ever destroys the association below, and the address outlives
+# any number of down/up cycles.
+#
+# Allocated once, out of band. If this data source cannot find it, create it:
+#
+#   aws ec2 allocate-address --domain vpc --region eu-west-3 \
+#     --tag-specifications \
+#     'ResourceType=elastic-ip,Tags=[{Key=Name,Value=cloud1-eip}]'
+#
+# and delete it the same way (`release-address`) on the day the project is
+# retired - AWS bills an allocated IPv4 address whether it is attached or not.
+data "aws_eip" "web" {
   tags = { Name = "cloud1-eip" }
+}
+
+# Attaching is still Terraform's job, and this is what `make down` removes.
+resource "aws_eip_association" "web" {
+  instance_id   = aws_instance.web.id
+  allocation_id = data.aws_eip.web.id
 
   depends_on = [aws_internet_gateway.main]
 }

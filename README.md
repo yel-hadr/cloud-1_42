@@ -59,7 +59,8 @@ roles/security/   ufw (22/80/443 only), fail2ban, unattended-upgrades, sshd hard
 roles/docker/     Docker Engine + Compose plugin from Docker's apt repo, enabled at boot
 roles/wordpress/  TLS material, the Compose stack, nginx vhosts, first-run WP install
 
-terraform/        VPC, subnet, IGW, route table, security group, key pair, instance, EIP
+terraform/        VPC, subnet, IGW, route table, security group, key pair, instance, EIP association
+scripts/          update-inventory.sh, run by `make inventory`
 ```
 
 ### Where is docker-compose.yml?
@@ -207,9 +208,40 @@ records for the domain and the `ansible_host` in `inventory.yaml` - and a stale
 asserts that every certificate name resolves to it. Pinning the address removes
 that whole class of failure.
 
-`make inventory` closes the loop: it rewrites `inventory.yaml` from
-`terraform output -raw instance_public_ip`, so Ansible always targets the
-instance that actually exists rather than an address typed in by hand.
+The address is pinned harder than that, though. Terraform *attaches* the EIP
+but does not own the allocation: `main.tf` reads it with a `data "aws_eip"`
+block matching the tag `Name=cloud1-eip`, and only the `aws_eip_association`
+is a managed resource. Had the allocation been a resource, `make down` would
+release it along with the VPC, and the next `make up` would come back on a
+fresh address with all three A records pointing at nothing. As written,
+teardown destroys the association and leaves the address allocated, so the
+DNS records set up once stay correct across any number of down/up cycles.
+
+The trade is money: AWS bills an allocated IPv4 address whether or not it is
+attached, roughly $3.60 a month while the stack is down. On the day the
+project is retired, hand it back:
+
+```sh
+aws ec2 release-address --region eu-west-3 --allocation-id <id>
+```
+
+And if the allocation does not exist yet - a fresh account, or after that
+release - create it once before the first `make up`:
+
+```sh
+aws ec2 allocate-address --domain vpc --region eu-west-3 \
+  --tag-specifications \
+  'ResourceType=elastic-ip,Tags=[{Key=Name,Value=cloud1-eip}]'
+```
+
+`make inventory` closes the loop: `scripts/update-inventory.sh` rewrites
+`inventory.yaml` from `terraform output -raw instance_public_ip`, so Ansible
+always targets the instance that actually exists rather than an address typed
+in by hand. It is idempotent - a no-op when the file already names the current
+address - and refuses to write anything that is not an IPv4 address, since the
+DNS gate below and the playbook's TLS preflight both compare that value against
+resolved A records. Run it on its own (`./scripts/update-inventory.sh`) when
+only the address has changed.
 
 `make dns` then refuses to go further until the A records agree with that
 address. The playbook's own preflight catches the same mistake, but only after
