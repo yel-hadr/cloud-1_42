@@ -9,6 +9,9 @@ PUBKEY  := server_key.pub
 
 # Read from group_vars rather than duplicated here, so there is one place
 # that defines the site's name. Override on the command line to test.
+# How long `make wait` will keep polling for SSH. Override per invocation.
+SSH_WAIT ?= 300
+
 VARS    := group_vars/webservers/vars.yml
 DOMAIN  := $(shell awk '/^wordpress_domain:/ {print $$2}' $(VARS))
 LE      := $(shell awk '/^wordpress_tls_letsencrypt:/ {print $$2}' $(VARS))
@@ -82,20 +85,23 @@ endif
 # Wait for the instance to accept SSH before configuring it. A freshly
 # created EC2 host needs cloud-init and sshd to finish before Ansible can
 # connect; without this step `make up` fails on first run.
-# Bounded to 60 attempts - each one up to timeout=10 plus a 5s sleep, so ~15
-# minutes at worst - so a persistent failure does not hang forever.
+#
+# One wait_for_connection call that retries internally, rather than a shell
+# loop around one-shot calls: the loop paid ~1.5s of ansible start-up on
+# every attempt and could only notice the host on a 15s boundary, while
+# `2>/dev/null` hid the reason for each failure - so a box that never came
+# up looked frozen for a quarter of an hour. This polls every 5s, prints
+# what went wrong when it gives up, and is bounded by SSH_WAIT (seconds,
+# 5 minutes by default):
+#   make wait SSH_WAIT=900
 wait:
-	@echo "Waiting for SSH on the new instance…"
-	@n=0; \
-	until ansible all -i inventory.yaml -m ansible.builtin.wait_for_connection -a 'timeout=10' 2>/dev/null; do \
-		n=$$((n + 1)); \
-		if [ $$n -ge 60 ]; then \
-			echo "ERROR: instance did not become SSH-reachable after 60 attempts."; \
-			echo "Check the key pair, security group, and instance console output."; \
-			exit 1; \
-		fi; \
-		sleep 5; \
-	done
+	@echo "Waiting up to $(SSH_WAIT)s for SSH on the new instance…"
+	@ansible all -i inventory.yaml -m ansible.builtin.wait_for_connection \
+		-a 'delay=0 sleep=5 timeout=$(SSH_WAIT)' || { \
+		echo "ERROR: instance was not SSH-reachable within $(SSH_WAIT)s."; \
+		echo "Check the key pair, security group, and instance console output."; \
+		exit 1; \
+	}
 	@echo "Instance is reachable."
 
 configure:
