@@ -2,7 +2,7 @@
 # Ansible targets whatever Terraform just built.
 output "instance_public_ip" {
   description = "Elastic IP attached to the instance."
-  value       = aws_eip.web.public_ip
+  value       = data.aws_eip.web.public_ip
 }
 
 output "ami_id" {

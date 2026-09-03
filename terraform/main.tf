@@ -147,13 +147,18 @@ resource "aws_instance" "web" {
   tags = { Name = "cloud1" }
 }
 
-# A stop/start would otherwise hand back a different public IP, breaking the
-# DNS records for youssefelhadraoui.tech. The EIP pins the address.
-resource "aws_eip" "web" {
-  domain   = "vpc"
-  instance = aws_instance.web.id
+# A stop/start - or a `make down` followed by `make up` - would otherwise
+# hand back a different public IP, breaking the DNS records for
+# youssefelhadraoui.tech. The address is reserved once in ./eip, which has
+# its own state and is never destroyed by this module; here it is only
+# looked up and attached to whichever instance currently exists.
+data "aws_eip" "web" {
+  id = var.eip_allocation_id
+}
 
-  tags = { Name = "cloud1-eip" }
+resource "aws_eip_association" "web" {
+  instance_id   = aws_instance.web.id
+  allocation_id = data.aws_eip.web.id
 
   depends_on = [aws_internet_gateway.main]
 }

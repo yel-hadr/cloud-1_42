@@ -106,14 +106,25 @@ configure:
 check:
 	ansible-playbook site.yml --check --diff
 
+# terraform/eip is a separate root module, so `$(TF) validate` - scoped to
+# terraform/ by -chdir - never reaches it. Validate it explicitly.
 lint:
 	ansible-lint
 	$(TF) fmt -check -recursive
 	$(TF) init -backend=false -input=false
 	$(TF) validate
+	terraform -chdir=terraform/eip init -backend=false -input=false
+	terraform -chdir=terraform/eip validate
 
 fmt:
 	$(TF) fmt -recursive
 
+# Destroys the instance and its network. The Elastic IP is deliberately not
+# in this module's state - it is reserved in terraform/eip so that `make up`
+# comes back on the same address and the DNS records keep working. AWS bills
+# an unattached address at ~$0.005/hour, so a box left down still costs a few
+# dollars a month. Release it with `terraform -chdir=terraform/eip destroy`
+# (and remove the prevent_destroy first) only if you are giving up the
+# address for good.
 down:
 	$(TF) destroy -auto-approve

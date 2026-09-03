@@ -33,6 +33,16 @@ variable "ssh_allowed_cidr" {
   default     = "0.0.0.0/0"
 }
 
+# The permanent address, reserved once in ./eip. That module keeps its own
+# state, so this cannot be wired up automatically - if the address is ever
+# re-created, copy the new value from:
+#   terraform -chdir=terraform/eip output allocation_id
+variable "eip_allocation_id" {
+  description = "Allocation ID of the Elastic IP reserved in ./eip."
+  type        = string
+  default     = "eipalloc-03ed77cd4d7ee8f86"
+}
+
 variable "vpc_cidr" {
   description = "CIDR for the project VPC."
   type        = string
